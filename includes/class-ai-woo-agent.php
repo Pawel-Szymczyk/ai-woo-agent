@@ -7,10 +7,27 @@ class AI_Woo_Agent {
 
     public function __construct() {
         $this->api = new AI_API();
+        add_action( 'init', [ $this, 'start_session' ] ); // track history per user session
+        add_action( 'wp_logout', [ $this, 'end_session' ] );
         add_action( 'rest_api_init',      [ $this, 'register_endpoints' ] );
         add_action( 'wp_enqueue_scripts', [ $this, 'enqueue_assets' ] );
         add_shortcode( 'ai_woo_agent',    [ $this, 'render_chat' ] );
     }
+
+    public function start_session(): void {
+        if ( ! session_id() ) session_start();
+    }
+    
+    public function end_session(): void {
+    // Usuń tylko historię naszego agenta, nie całą sesję
+    if ( isset( $_SESSION ) ) {
+        foreach ( $_SESSION as $key => $value ) {
+            if ( strpos( $key, 'ai_woo_' ) === 0 ) {
+                unset( $_SESSION[ $key ] );
+            }
+        }
+    }
+}
 
     // ── REST Endpoint ─────────────────────────────────────────────────────
     public function register_endpoints(): void {
@@ -27,24 +44,31 @@ class AI_Woo_Agent {
     public function handle_chat( WP_REST_Request $request ): WP_REST_Response {
 
         $message = sanitize_text_field( $request->get_param( 'message' ) );
+        $session_id = sanitize_key( $request->get_param( 'session_id' ) );
         $user_id = get_current_user_id();
 
         if ( empty( $message ) ) {
             return new WP_REST_Response( [ 'error' => 'Message required.' ], 400 );
         }
 
+        // Historia rozmowy z sesji
+        $session_key = 'ai_woo_' . $session_id;
+        $history     = $_SESSION[ $session_key ] ?? [];
+        $history[]   = [ 'role' => 'user', 'content' => $message ];
+
         // Pobierz kontekst zamówień klienta
         $context = $this->get_customer_context( $user_id );
         $system  = $this->get_system_prompt( $context );
 
-        $reply = $this->api->send_messages(
-            [ [ 'role' => 'user', 'content' => $message ] ],
-            $system
-        );
+        $reply = $this->api->send_messages( $history, $system );
 
         if ( is_wp_error( $reply ) ) {
             return new WP_REST_Response( [ 'error' => $reply->get_error_message() ], 500 );
         }
+
+        // Zapisz historię
+        $history[]               = [ 'role' => 'assistant', 'content' => $reply ];
+        $_SESSION[ $session_key ] = array_slice( $history, -20 );
 
         // Eskalacja do admina gdy agent nie może pomóc
         $this->maybe_escalate( $message, $reply, $user_id );
@@ -125,13 +149,20 @@ class AI_Woo_Agent {
     }
 
     // ── Assets ────────────────────────────────────────────────────────────
-    public function enqueue_assets(): void {
+   public function enqueue_assets(): void {
         global $post;
         if ( ! is_a( $post, 'WP_Post' ) || ! has_shortcode( $post->post_content, 'ai_woo_agent' ) ) {
-            return;
+            return; // ← sprawdzenie na początku, nie w środku
         }
+
         wp_enqueue_style( 'ai-woo-chat', AI_WOO_URL . 'assets/css/chat.css', [], AI_WOO_VERSION );
-        wp_enqueue_script( 'ai-woo-chat', AI_WOO_URL . 'assets/js/chat.js', [], AI_WOO_VERSION, true );
+
+        wp_enqueue_script( 'dompurify', 'https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js', [], '3.0.0', true );
+        wp_enqueue_script( 'marked',    'https://cdn.jsdelivr.net/npm/marked/marked.min.js',            [], '9.0.0', true );
+
+        // chat.js zależy od marked i dompurify — ładowane przed nim
+        wp_enqueue_script( 'ai-woo-chat', AI_WOO_URL . 'assets/js/chat.js', [ 'marked', 'dompurify' ], AI_WOO_VERSION, true );
+
         wp_localize_script( 'ai-woo-chat', 'AiChatConfig', [
             'apiUrl' => rest_url( 'ai-woo/v1/chat' ),
             'nonce'  => wp_create_nonce( 'wp_rest' ),

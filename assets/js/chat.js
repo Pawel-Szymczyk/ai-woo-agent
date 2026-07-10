@@ -1,4 +1,6 @@
 // assets/js/chat.js
+const marked = window.marked;
+
 // IIFE (Immediately Invoked Function Expression) — prevents global scope pollution.
 ( function() {
     'use strict';
@@ -22,7 +24,7 @@
     function addMessage( text, role ) {
         const div     = document.createElement( 'div' );
         div.className = 'ai-message ai-message--' + role;
-        div.textContent = text; // textContent is safe — no XSS risk unlike innerHTML
+        div.innerHTML = DOMPurify.sanitize( marked.parse( text ) );
         messages.appendChild( div );
         messages.scrollTop = messages.scrollHeight; // auto-scroll to newest
         return div;
@@ -52,7 +54,6 @@
                 body: JSON.stringify( {
                     message:    text,
                     session_id: sessionId,            // server uses this to find history
-                    post_id:    AiChatConfig.post_id, // for page context feature
                 } ),
             } );
  
