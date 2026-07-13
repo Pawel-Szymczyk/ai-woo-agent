@@ -1,4 +1,4 @@
-# AI WooCommerce Agent — Wtyczka WordPress
+# AI WooCommerce Agent Wtyczka WordPress
  
 Inteligentny agent AI obsługi klienta dla sklepów WooCommerce, oparty na Claude API (Anthropic). Klient pyta o swoje zamówienia w naturalnym języku, a agent odpowiada na podstawie rzeczywistych danych ze sklepu. Gdy agent nie może pomóc, automatycznie powiadamia administratora.
  
